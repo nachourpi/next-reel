@@ -3,6 +3,7 @@ import { join } from 'node:path'
 
 const root = new URL('../.output/public/', import.meta.url).pathname
 await access(join(root, 'index.html'))
+await access(join(root, 'explain/index.html'))
 
 async function inspect(directory: string): Promise<void> {
   for (const entry of await readdir(directory, { withFileTypes: true })) {

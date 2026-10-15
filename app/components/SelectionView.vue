@@ -15,6 +15,11 @@ const selectedMovies = computed(() =>
 )
 const query = ref('')
 const genre = ref('All genres')
+const filtersVisible = ref(false)
+function toggleFilters() {
+  filtersVisible.value = !filtersVisible.value
+  if (!filtersVisible.value) resetFilters()
+}
 const genres = computed(() => [...new Set(props.movies.flatMap((movie) => movie.genres))].sort())
 const filteredMovies = computed(() =>
   props.movies.filter(
@@ -42,7 +47,19 @@ function resetFilters() {
       :aria-busy="loading"
       :inert="loading"
     >
-      <div class="catalog-toolbar">
+      <div class="filter-disclosure">
+        <button
+          class="text-button"
+          :aria-expanded="filtersVisible"
+          aria-controls="catalog-filters"
+          @click="toggleFilters"
+        >
+          <AppIcon name="search" :size="15" />{{
+            filtersVisible ? 'Hide filters' : 'Search & filters'
+          }}
+        </button>
+      </div>
+      <div v-if="filtersVisible" id="catalog-filters" class="catalog-toolbar">
         <label class="search-input"
           ><AppIcon name="search" :size="19" /><span class="sr-only">Search movies</span
           ><input v-model="query" type="search" placeholder="Search for a film…" autocomplete="off"

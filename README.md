@@ -29,24 +29,25 @@ npm run preview      # Run the built app in Cloudflare's local runtime
 ## The experience
 
 - A cinema-inspired poster collection with warm charcoal, ivory and coral, self-hosted Fraunces and Manrope, short transitions and reduced-motion support.
-- Search and genre filters, persistent favorites, movie details, five initial recommendations and five more on demand.
-- An optional comparison between user-based, item-based and popularity recommendations, with mobile tabs.
+- Search and genre filters behind a discreet disclosure, persistent favorites, movie details, five initial recommendations and five more on demand.
+- Always-visible tabs for User-Based KNN, Item-Based and Popularity, plus an explicit start-over action that clears favorites.
+- Optional algorithm settings with explanations, and a separate step-by-step calculation page for every recommendation, including formulas, charts and actual anonymous evidence.
 - Cold-start popular picks, computed explanations, clear error states and keyboard-accessible dialogs.
 
 Favorites are stored in localStorage in the current browser. Clicking the recommendation button sends selected movie IDs to the API. Preferences are never appended to the historical dataset, and request bodies are not logged by application code.
 
 ## Architecture
 
-One Nuxt 4 / Vue / TypeScript application, with two Nitro endpoints and no database. Cloudflare Pages serves the prerendered entry page and static assets; its Worker runs the API. Pages was chosen to provide a project-specific `pages.dev` address without changing the existing account-wide Workers subdomain.
+One Nuxt 4 / Vue / TypeScript application, with three Nitro endpoints and no database. Cloudflare Pages serves the prerendered home and explanation pages and static assets; its Worker runs the API. Pages was chosen to provide a project-specific `pages.dev` address without changing the existing account-wide Workers subdomain.
 
 - `app/`: Vue components, UI state and CSS.
 - `server/recommender/`: framework-independent recommendation and validation functions.
-- `server/api/`: catalog and recommendation endpoints.
+- `server/api/`: catalog, recommendation and explanation endpoints.
 - `scripts/`: model preparation, catalog enrichment and reproducible evaluation.
 - `data/`: reviewed TMDB mapping and prepared public movie metadata.
 - `movies.json`: the original assessment dataset, unchanged.
 
-The build prepares popularity counts and the 70-by-70 item similarity matrix in an ignored generated directory. The server model contains anonymous preference arrays, not historical user IDs. The browser receives movie metadata and aggregate recommendation evidence only. Recommendation functions are shared by the API, tests and evaluation script.
+The build prepares popularity counts and the 70-by-70 item similarity matrix in an ignored generated directory. The server model contains anonymous preference arrays, not historical user IDs. The browser receives movie metadata and limited anonymous calculation evidence only. Recommendation functions are shared by the API, tests and evaluation script.
 
 ### API
 
@@ -58,13 +59,23 @@ The build prepares popularity counts and the 70-by-70 item similarity matrix in 
 {
   "likedMovieIds": [23, 33, 68],
   "compare": true,
-  "limit": 10
+  "limit": 10,
+  "parameters": {
+    "neighbors": 40,
+    "userMetric": "cosine",
+    "itemMetric": "cosine",
+    "itemAggregation": "mean"
+  }
 }
 ```
 
-`likedMovieIds` is required; duplicates are removed and every ID must belong to the catalog. `compare` defaults to false. `limit` accepts 5 or 10 and defaults to 10. Malformed input returns HTTP 400.
+`likedMovieIds` is required; duplicates are removed and every ID must belong to the catalog. `compare` defaults to false. `limit` accepts 5 or 10 and defaults to 10. The optional `parameters` object accepts `neighbors` (integer 1–100), `userMetric` and `itemMetric` (`cosine` or `jaccard`), and `itemAggregation` (`mean` or `max`). Missing fields use the defaults above. Malformed input returns HTTP 400.
 
-The response contains a `mode` (`personalized` or `popular`) and `results`. Each result identifies its algorithm, fallback status and ranked recommendations with `movieId`, a score in [0, 1], a reason and aggregate supporting evidence. Comparison returns user-based, item-based and popularity lists. Empty selections return one popularity list. Responses are not cached.
+The response includes the normalized `likedMovieIds` and `parameters` snapshot, a `mode` (`personalized` or `popular`) and `results`. Each result identifies its requested and actual algorithm, fallback status and ranked recommendations with `movieId`, a score in [0, 1], a reason and aggregate supporting evidence. Comparison returns user-based, item-based and popularity lists. Empty selections return one popularity list. Responses are not cached.
+
+`POST /api/explanations` accepts the same selection and parameters plus `algorithm` (`user`, `item`, or `popularity`) and an optional candidate `movieId` (defaults to the method’s top result). It returns the actual score, rank, counts and calculation trace. KNN traces include anonymous neighbor ranks, similarities, shared selected-film IDs, list sizes and contributions; full historical profiles and identifiers stay on the server. Item traces include audience counts and overlaps. Popularity traces include picked and unknown counts.
+
+The `/explain` page reads a selection-and-parameter snapshot from its link and requests this trace on the client. It reproduces the same computation on refresh. Client navigation back preserves the current results through Vue KeepAlive. These URLs contain selected film IDs and settings, so sharing one also shares that selection; there is no server-side preference persistence.
 
 ## Recommendation methods
 
@@ -80,7 +91,7 @@ score(movie) = sum(similarity of neighbors who picked movie)
                / sum(similarity of all chosen neighbors)
 ```
 
-Use up to 40 neighbors with positive cosine similarity. More similar viewers contribute more weight. The UI explains how many chosen neighbors selected each recommendation. Forty is a fixed, documented baseline, not a claimed optimal hyperparameter.
+Use up to 40 neighbors with positive cosine similarity. More similar viewers contribute more weight. The UI explains how many chosen neighbors selected each recommendation. Forty is the default baseline, not a claimed optimal hyperparameter. The optional settings change K from 1 to 100 or switch to Jaccard: `|S ∩ U| / |S ∪ U|`. Settings take effect only after an explicit recalculation.
 
 ### Item-Based collaborative filtering
 
@@ -90,7 +101,7 @@ similarity(A, B) = viewers who picked both A and B
 score(movie) = average similarity(movie, selected favorite)
 ```
 
-Films are related through their audiences. Genres, synopses and posters do not affect ranking. The explanation names the selected favorite with the strongest association.
+Films are related through their audiences. Genres, synopses and posters do not affect ranking. The explanation names the selected favorite with the strongest association. Optional settings switch cosine to audience Jaccard (`shared viewers / distinct combined viewers`) or replace the average with the maximum association. The average includes zero similarities; maximum uses only the strongest favorite. Precomputed cosine and popularity counts recover the exact integer audience overlaps needed for Jaccard.
 
 ### Popularity
 
@@ -106,7 +117,7 @@ The UI multiplies each raw score by 100 and rounds for display. It never stretch
 
 ## Evaluation
 
-Run `npm run evaluate`. Seed 42 produces an 80/20 split of preference-profile groups. Identical profiles stay in one partition, preventing duplicate-profile leakage. All models use only training users; test users are excluded entirely.
+Run `npm run evaluate`. Evaluation always uses the default parameters; the exploratory controls do not imply that other values improve accuracy. Seed 42 produces an 80/20 split of preference-profile groups. Identical profiles stay in one partition, preventing duplicate-profile leakage. All models use only training users; test users are excluded entirely.
 
 The split yields **644 training users** and **123 eligible test users** with at least six positive preferences. The same test cohort is evaluated with one, three and five revealed favorites. The remaining recorded positives are hidden targets. All 70 movies remain candidates, excluding revealed favorites.
 

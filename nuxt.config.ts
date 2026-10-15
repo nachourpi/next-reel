@@ -19,7 +19,7 @@ export default defineNuxtConfig({
   nitro: {
     preset: 'cloudflare_pages',
     output: { dir: '.output/public' },
-    prerender: { routes: ['/'] },
+    prerender: { routes: ['/', '/explain'] },
     cloudflare: { pages: { defaultRoutes: false, routes: { include: ['/api/*'], exclude: [] } } },
   },
   typescript: { strict: true },

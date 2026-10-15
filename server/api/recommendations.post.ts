@@ -16,7 +16,7 @@ export default defineEventHandler(async (event): Promise<RecommendationResponse>
       statusMessage: error instanceof Error ? error.message : 'Invalid recommendation request.',
     })
   }
-  const { likedMovieIds, compare, limit } = request
+  const { likedMovieIds, compare, limit, parameters } = request
   const algorithms: Algorithm[] = !likedMovieIds.length
     ? ['popularity']
     : compare
@@ -24,8 +24,10 @@ export default defineEventHandler(async (event): Promise<RecommendationResponse>
       : ['user']
   return {
     mode: likedMovieIds.length ? 'personalized' : 'popular',
+    likedMovieIds,
+    parameters,
     results: algorithms.map((algorithm) =>
-      recommend(model as Model, likedMovieIds, algorithm, limit),
+      recommend(model as Model, likedMovieIds, algorithm, limit, parameters),
     ),
   }
 })

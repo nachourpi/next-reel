@@ -6,6 +6,8 @@ test('selects, filters, saves and removes favorites', async ({ page }) => {
   await expect(toyStory).toHaveAttribute('aria-pressed', 'false')
   await toyStory.click()
   await expect(toyStory).toHaveAttribute('aria-pressed', 'true')
+  await expect(page.getByRole('searchbox', { name: 'Search movies' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'Search & filters' }).click()
   await page.getByRole('searchbox', { name: 'Search movies' }).fill('alien')
   await expect(page.getByRole('button', { name: 'Select Alien', exact: true })).toBeVisible()
   await expect(toyStory).toHaveCount(0)
@@ -34,9 +36,9 @@ test('opens an accessible movie dialog and restores focus on escape', async ({ p
   await expect(details).toBeFocused()
 })
 
-test('personalizes, expands, compares and returns to the saved selection', async ({
+test('personalizes, expands, switches methods and returns to the saved selection', async ({
   page,
-}, testInfo) => {
+}) => {
   await page.goto('/')
   for (const title of ['Toy Story', 'Twelve Monkeys', 'Braveheart'])
     await page.getByRole('button', { name: `Select ${title}`, exact: true }).click()
@@ -50,13 +52,11 @@ test('personalizes, expands, compares and returns to the saved selection', async
   ).toHaveCount(0)
   await page.getByRole('button', { name: 'Five more possibilities' }).click()
   await expect(page.locator('.result-item')).toHaveCount(10)
-  await page.getByRole('button', { name: 'Compare methods' }).click()
-  await expect(page.locator('.method-panel')).toHaveCount(3)
-  if (testInfo.project.name === 'mobile') {
-    await page.getByRole('tab', { name: 'Connected films' }).click()
-    await expect(page.getByRole('tabpanel', { name: 'Connected films' })).toBeVisible()
-    await expect(page.getByRole('tabpanel', { name: 'Shared taste' })).toBeHidden()
-  }
+  await expect(page.getByRole('tab')).toHaveCount(3)
+  await page.getByRole('tab', { name: 'Item-Based' }).click()
+  await expect(page.getByRole('tabpanel', { name: 'Item-Based' })).toBeVisible()
+  await page.getByRole('tab', { name: 'Popularity' }).click()
+  await expect(page.locator('.result-item').first()).toContainText('of viewers')
   await page.getByRole('button', { name: 'Edit your taste' }).click()
   await expect(page.getByRole('button', { name: 'Select Toy Story', exact: true })).toHaveAttribute(
     'aria-pressed',
@@ -77,7 +77,7 @@ test('offers clearly labeled popular picks with no favorites', async ({ page }) 
   await expect(page.locator('.result-item').first()).toContainText('Star Wars')
   await expect(page.locator('.result-item').first()).toContainText('72')
   await expect(page.locator('.result-item').first()).toContainText('of viewers')
-  await expect(page.getByRole('button', { name: 'Compare methods' })).toHaveCount(0)
+  await expect(page.getByRole('tab', { name: 'User-Based KNN' })).toBeDisabled()
 })
 
 test('recovers from a recommendation error without losing favorites', async ({ page }) => {
@@ -133,6 +133,7 @@ test('handles empty search, missing posters and reduced motion', async ({ page }
       .first()
       .evaluate((el) => getComputedStyle(el).animationName),
   ).toBe('none')
+  await page.getByRole('button', { name: 'Search & filters' }).click()
   await page.getByRole('searchbox', { name: 'Search movies' }).fill('not-a-real-movie')
   await expect(page.getByRole('heading', { name: 'No films in this frame.' })).toBeVisible()
   await page.getByRole('button', { name: 'Reset filters' }).click()
@@ -172,5 +173,111 @@ test('validates the public API and exposes no historical profiles', async ({ req
     expect(method.recommendations.every((item: { movieId: number }) => item.movieId !== 1)).toBe(
       true,
     )
+  }
+})
+
+test('hides active filters cleanly and starts over with an empty saved selection', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Select Toy Story', exact: true }).click()
+  await page.getByRole('button', { name: 'Search & filters' }).click()
+  await page.getByRole('searchbox', { name: 'Search movies' }).fill('alien')
+  await page.getByRole('button', { name: 'Hide filters' }).click()
+  await expect(page.locator('.movie-card')).toHaveCount(70)
+  await page.getByRole('button', { name: 'Find my next reel', exact: true }).click()
+  await page.getByRole('button', { name: 'Start over', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Good films. Your kind of good.' })).toBeVisible()
+  await expect(page.locator('.selection-count')).toContainText('Your next favorite starts here')
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('next-reel:likes')!))).toEqual(
+    [],
+  )
+})
+
+test('adjusts both algorithms explicitly and explains real calculation snapshots', async ({
+  page,
+}) => {
+  const browserErrors: string[] = []
+  page.on('pageerror', (error) => browserErrors.push(error.message))
+  await page.goto('/')
+  for (const title of ['Toy Story', 'The Shawshank Redemption'])
+    await page.getByRole('button', { name: `Select ${title}`, exact: true }).click()
+  await page.getByRole('button', { name: 'Find my next reel', exact: true }).click()
+  await page.getByRole('button', { name: 'Algorithm settings', exact: true }).click()
+  await page.getByLabel('Neighbors (K)', { exact: true }).fill('12')
+  await page.getByLabel('Viewer similarity', { exact: true }).selectOption('jaccard')
+  await page.getByLabel('Movie similarity', { exact: true }).selectOption('jaccard')
+  await page.getByLabel('Combine associations', { exact: true }).selectOption('max')
+  const recResponse = page.waitForResponse(
+    (response) =>
+      response.url().endsWith('/api/recommendations') && response.request().method() === 'POST',
+  )
+  await page.getByRole('button', { name: 'Apply & recalculate' }).click()
+  const result = await (await recResponse).json()
+  expect(result.parameters).toEqual({
+    neighbors: 12,
+    userMetric: 'jaccard',
+    itemMetric: 'jaccard',
+    itemAggregation: 'max',
+  })
+  await expect(page.getByRole('button', { name: 'Apply & recalculate' })).toBeEnabled()
+  const firstUserScore = Math.round(result.results[0].recommendations[0].score * 100)
+  await page.getByRole('link', { name: 'Why this film?' }).first().click()
+  await expect(page.getByRole('heading', { name: 'Find viewers with shared taste.' })).toBeVisible()
+  await expect(page.locator('.explanation-score')).toContainText(`${firstUserScore}%`)
+  await expect(page.locator('.calculation-steps')).toContainText('12 closest positive matches')
+  await expect(page.locator('math')).toHaveCount(2)
+  await expect(page.getByRole('img', { name: /Actual User-Based KNN evidence/ })).toBeVisible()
+  await page.getByRole('link', { name: 'Back to your picks', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Your next great watch.' })).toBeVisible()
+  await expect(page).toHaveTitle('Next Reel · Find your kind of film')
+  await expect(page.getByLabel('Neighbors (K)', { exact: true })).toHaveValue('12')
+  await page.getByRole('tab', { name: 'Item-Based' }).click()
+  await page.getByRole('tab', { name: 'Item-Based' }).press('ArrowRight')
+  await expect(page.getByRole('tab', { name: 'Popularity' })).toBeFocused()
+  await page.getByRole('tab', { name: 'Item-Based' }).click()
+  await page.getByRole('link', { name: 'How this method works', exact: false }).click()
+  await expect(page.getByRole('heading', { name: 'Take the strongest connection.' })).toBeVisible()
+  await page.reload()
+  await expect(page.getByRole('heading', { name: 'Take the strongest connection.' })).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+  expect(browserErrors).toEqual([])
+})
+
+test('explains cold start and recovers from explanation API errors', async ({ page }) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Find my next reel', exact: true }).click()
+  await page.route(
+    '**/api/explanations',
+    (route) => route.fulfill({ status: 500, json: { message: 'Unavailable' } }),
+    { times: 1 },
+  )
+  await page.getByRole('link', { name: 'Why this film?' }).first().click()
+  await expect(page.getByRole('alert')).toContainText('We could not load this calculation')
+  await page.getByRole('button', { name: 'Try again', exact: true }).click()
+  await expect(page.getByRole('heading', { name: 'Divide by the whole community.' })).toBeVisible()
+  await expect(page.locator('.final-calculation')).toContainText('72%')
+})
+
+test('validates explanation inputs and keeps evidence anonymous', async ({ request }) => {
+  for (const data of [
+    { likedMovieIds: [1], algorithm: 'invalid' },
+    { likedMovieIds: [1], movieId: 1 },
+    { likedMovieIds: [1], movieId: 999 },
+    { likedMovieIds: [1], parameters: { neighbors: 0 } },
+  ])
+    expect((await request.post('/api/explanations', { data })).status()).toBe(400)
+  const response = await request.post('/api/explanations', {
+    data: { likedMovieIds: [1], algorithm: 'user', parameters: { neighbors: 40 } },
+  })
+  expect(response.headers()['cache-control']).toBe('no-store')
+  const data = await response.json()
+  expect(data.trace.neighbors).toHaveLength(40)
+  for (const neighbor of data.trace.neighbors) {
+    expect(neighbor).not.toHaveProperty('user_id')
+    expect(neighbor).not.toHaveProperty('likes')
+    expect(neighbor.sharedMovieIds).toEqual([1])
   }
 })

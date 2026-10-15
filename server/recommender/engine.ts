@@ -1,4 +1,12 @@
-import type { Algorithm, Dataset, Recommendation, RecommendationResult } from '../../shared/types'
+import type {
+  Algorithm,
+  Dataset,
+  Recommendation,
+  RecommendationResult,
+  RecommendationParameters,
+  SimilarityMetric,
+} from '../../shared/types'
+import { DEFAULT_PARAMETERS } from '../../shared/recommendation'
 
 export interface Model {
   movieIds: number[]
@@ -57,17 +65,85 @@ function rank(candidates: Recommendation[], limit: number): Recommendation[] {
   return candidates.sort((a, b) => b.score - a.score || a.movieId - b.movieId).slice(0, limit)
 }
 
+export function similarity(
+  shared: number,
+  left: number,
+  right: number,
+  metric: SimilarityMetric,
+): number {
+  const denominator = metric === 'cosine' ? Math.sqrt(left * right) : left + right - shared
+  return denominator ? shared / denominator : 0
+}
+
+export function findNeighbors(
+  model: Model,
+  selectedIds: number[],
+  parameters: RecommendationParameters,
+) {
+  const selected = new Set(selectedIds)
+  const eligible = model.users
+    .map((likes, index) => {
+      const sharedMovieIds = likes.filter((id) => selected.has(id))
+      return {
+        likes,
+        index,
+        sharedMovieIds,
+        similarity: similarity(
+          sharedMovieIds.length,
+          selected.size,
+          likes.length,
+          parameters.userMetric,
+        ),
+      }
+    })
+    .filter((user) => user.similarity > 0)
+    .sort((a, b) => b.similarity - a.similarity || a.index - b.index)
+  return { eligibleCount: eligible.length, neighbors: eligible.slice(0, parameters.neighbors) }
+}
+
+export function findAssociations(
+  model: Model,
+  selectedIds: number[],
+  movieId: number,
+  parameters: RecommendationParameters,
+) {
+  return [...new Set(selectedIds)]
+    .map((id) => {
+      const favoriteViewers = model.popularity[id] ?? 0
+      const movieViewers = model.popularity[movieId] ?? 0
+      const sharedViewers = Math.round(
+        (model.similarities[movieId]?.[id] ?? 0) * Math.sqrt(favoriteViewers * movieViewers),
+      )
+      return {
+        movieId: id,
+        favoriteViewers,
+        sharedViewers,
+        similarity: similarity(sharedViewers, favoriteViewers, movieViewers, parameters.itemMetric),
+      }
+    })
+    .sort((a, b) => b.similarity - a.similarity || a.movieId - b.movieId)
+}
+
+export function combineAssociations(values: number[], aggregation: 'mean' | 'max'): number {
+  if (!values.length) return 0
+  return aggregation === 'max'
+    ? Math.max(...values)
+    : values.reduce((sum, value) => sum + value, 0) / values.length
+}
+
 export function recommend(
   model: Model,
   selectedIds: number[],
   algorithm: Algorithm = 'user',
   limit = 10,
+  parameters: RecommendationParameters = DEFAULT_PARAMETERS,
 ): RecommendationResult {
   const selected = new Set(selectedIds)
   const candidates = model.movieIds.filter((id) => !selected.has(id))
 
   const popular = (fallback = false): RecommendationResult => ({
     algorithm: 'popularity',
+    requestedAlgorithm: algorithm,
     fallback,
     recommendations: rank(
       candidates.map((movieId) => ({
@@ -81,39 +157,36 @@ export function recommend(
   })
 
   if (!selected.size || algorithm === 'popularity') return popular()
-  if (!candidates.length) return { algorithm, fallback: false, recommendations: [] }
+  if (!candidates.length)
+    return { algorithm, requestedAlgorithm: algorithm, fallback: false, recommendations: [] }
 
   if (algorithm === 'item') {
     const recommendations = candidates
       .map((movieId) => {
-        const associations = [...selected]
-          .map((id) => ({ id, similarity: model.similarities[movieId]?.[id] ?? 0 }))
-          .sort((a, b) => b.similarity - a.similarity || a.id - b.id)
+        const associations = findAssociations(model, selectedIds, movieId, parameters)
         const strongest = associations[0]!
         return {
           movieId,
-          score: associations.reduce((sum, item) => sum + item.similarity, 0) / selected.size,
-          supportingMovieId: strongest.id,
-          reason: `Often picked alongside ${model.titles[strongest.id]}.`,
+          score: combineAssociations(
+            associations.map((item) => item.similarity),
+            parameters.itemAggregation,
+          ),
+          supportingMovieId: strongest.movieId,
+          reason: `Often picked alongside ${model.titles[strongest.movieId]}.`,
         }
       })
       .filter((item) => item.score > 0)
     return recommendations.length
-      ? { algorithm, fallback: false, recommendations: rank(recommendations, limit) }
+      ? {
+          algorithm,
+          requestedAlgorithm: algorithm,
+          fallback: false,
+          recommendations: rank(recommendations, limit),
+        }
       : popular(true)
   }
 
-  const neighbors = model.users
-    .map((likes, index) => ({
-      likes,
-      index,
-      similarity: likes.length
-        ? likes.filter((id) => selected.has(id)).length / Math.sqrt(selected.size * likes.length)
-        : 0,
-    }))
-    .filter((user) => user.similarity > 0)
-    .sort((a, b) => b.similarity - a.similarity || a.index - b.index)
-    .slice(0, 40)
+  const { neighbors } = findNeighbors(model, selectedIds, parameters)
   const totalWeight = neighbors.reduce((sum, user) => sum + user.similarity, 0)
   if (!totalWeight) return popular(true)
 
@@ -136,6 +209,7 @@ export function recommend(
   return recommendations.length
     ? {
         algorithm,
+        requestedAlgorithm: algorithm,
         fallback: false,
         neighborCount: neighbors.length,
         recommendations: rank(recommendations, limit),

@@ -1,6 +1,13 @@
 <script setup lang="ts">
-import type { Movie, RecommendationResult } from '../../shared/types'
-defineProps<{ result: RecommendationResult; movies: Movie[]; visibleCount: number }>()
+import type { Movie, RecommendationResult, RecommendationParameters } from '../../shared/types'
+import { explanationLink } from '#shared/recommendation'
+defineProps<{
+  result: RecommendationResult
+  movies: Movie[]
+  visibleCount: number
+  likedMovieIds: number[]
+  parameters: RecommendationParameters
+}>()
 defineEmits<{ details: [movie: Movie] }>()
 const descriptions = {
   user: {
@@ -29,7 +36,8 @@ const descriptions = {
       <p>{{ descriptions[result.algorithm].description }}</p>
     </div>
     <p v-if="result.fallback" class="fallback-note" role="status">
-      Not enough shared preferences yet. These are popular picks instead.
+      This method has no supported unseen films for this selection and settings. Showing popular
+      picks instead.
     </p>
     <ol class="result-grid">
       <li
@@ -56,6 +64,12 @@ const descriptions = {
             <span :style="{ width: `${recommendation.score * 100}%` }" />
           </div>
           <p class="recommendation-reason">{{ recommendation.reason }}</p>
+          <NuxtLink
+            class="explain-link"
+            :to="explanationLink(result.requestedAlgorithm, movie.id, likedMovieIds, parameters)"
+          >
+            Why this film? <AppIcon name="arrow" :size="14" />
+          </NuxtLink>
         </template>
       </li>
     </ol>
