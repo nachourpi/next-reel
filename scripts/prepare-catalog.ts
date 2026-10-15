@@ -108,8 +108,7 @@ if (process.argv.includes('--discover')) {
   try {
     await access(backdrop)
   } catch {
-    const source = await api<{ backdrop_path: string }>('movie/78')
-    const image = await fetch(`https://image.tmdb.org/t/p/w1280${source.backdrop_path}`, {
+    const image = await fetch('https://image.tmdb.org/t/p/w1280/eIi3klFf7mp3oL5EEF4mLIDs26r.jpg', {
       signal: AbortSignal.timeout(20000),
     })
     if (!image.ok) throw new Error('Could not download the Blade Runner backdrop.')

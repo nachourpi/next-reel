@@ -1309,7 +1309,7 @@
       linear-gradient(0deg, var(--bg), transparent 80%),
       url('/cinema-backdrop.webp') center 35% / cover;
     opacity: 0.55;
-    filter: sepia(0.65);
+    filter: blur(10px) sepia(0.85);
   }
   .site-header {
     padding: 41px 0 23px;

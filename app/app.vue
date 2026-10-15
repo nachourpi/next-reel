@@ -81,6 +81,7 @@ async function getRecommendations(comparison = false) {
       method: 'POST',
       body: { likedMovieIds: selectedIds.value, compare: comparison, limit: 10 },
       signal: controller.signal,
+      timeout: 10000,
     })
     compare.value = comparison && result.value.results.length > 1
     screen.value = 'results'

@@ -98,6 +98,28 @@ test('recovers from a recommendation error without losing favorites', async ({ p
   await expect(page.getByRole('heading', { name: 'Your next great watch.' })).toBeVisible()
 })
 
+test('prevents changes and duplicate submissions while finding recommendations', async ({
+  page,
+}) => {
+  await page.goto('/')
+  await page.getByRole('button', { name: 'Select Toy Story', exact: true }).click()
+  let release!: () => void
+  const waiting = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  await page.route('**/api/recommendations', async (route) => {
+    await waiting
+    await route.continue()
+  })
+  await page.getByRole('button', { name: 'Find my next reel', exact: true }).click()
+  await expect(page.getByRole('button', { name: 'Finding your next reel' })).toBeDisabled()
+  await expect(
+    page.getByRole('button', { name: 'Select Toy Story', exact: true, includeHidden: true }),
+  ).toBeDisabled()
+  release()
+  await expect(page.getByRole('heading', { name: 'Your next great watch.' })).toBeVisible()
+})
+
 test('handles empty search, missing posters and reduced motion', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' })
   await page.route('**/posters/1-*.webp', (route) => route.abort())
