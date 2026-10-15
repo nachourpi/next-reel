@@ -1,7 +1,6 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "next-reel",
-  "account_id": "834ba0fd29e6e04265693f2e7210eb7b",
   "pages_build_output_dir": ".output/public",
   "compatibility_date": "2026-10-14",
   "compatibility_flags": ["nodejs_compat"],

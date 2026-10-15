@@ -150,7 +150,7 @@ The public GitHub repository connects directly to Cloudflare Pages:
 
 Pushes run typecheck, unit tests and build before deployment. Browser tests are run separately against the local production runtime and public demo. There is no GitHub Actions workflow and no build-time TMDB secret.
 
-For a manual deployment after `npm run verify`, authenticate with `npx wrangler login`, check `npx wrangler whoami`, then run `npm run deploy`. The Wrangler configuration pins the personal Cloudflare account and project name. Pages deployment logs and `wrangler pages deployment tail` are available for runtime diagnosis.
+For a manual deployment after `npm run verify`, authenticate with `npx wrangler login`, check `npx wrangler whoami`, then run `npm run deploy`. The deploy command pins the personal Cloudflare account, and the Wrangler configuration sets the project name. Pages deployment logs and `wrangler pages deployment tail` are available for runtime diagnosis.
 
 ## Credits and limits
 
