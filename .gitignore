@@ -1,0 +1,15 @@
+node_modules/
+.nuxt/
+.output/
+dist/
+.wrangler/
+.generated/
+.env
+.env.*
+!.env.example
+coverage/
+test-results/
+playwright-report/
+output/
+.playwright-cli/
+.DS_Store
